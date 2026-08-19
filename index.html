@@ -314,6 +314,45 @@
   .toggle.on{background:var(--green)}
   .toggle.on::after{transform:translateX(18px)}
   .set-foot{text-align:center;font-size:11.5px;color:var(--ink-faint);margin:22px 0 0}
+
+  /* ---- saved-locations carousel ---- */
+  .saved{margin-top:18px}
+  .saved-head{display:flex;align-items:center;justify-content:space-between;margin:0 4px 9px}
+  .saved-head .lbl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-faint)}
+  .saved-head .arrows{display:flex;gap:6px}
+  .arw{width:28px;height:28px;border-radius:9px;border:1px solid var(--line);background:var(--panel);
+    display:grid;place-items:center;cursor:pointer;color:var(--ink-soft);box-shadow:var(--shadow);transition:transform .1s}
+  .arw:active{transform:scale(.9)}
+  .arw svg{width:15px;height:15px}
+  .track{display:flex;gap:11px;overflow-x:auto;scroll-snap-type:x mandatory;
+    padding:4px 4px 8px;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
+  .track::-webkit-scrollbar{height:0}
+  .place{
+    scroll-snap-align:start;flex:0 0 auto;width:160px;position:relative;
+    background:var(--panel);border:1px solid var(--line);border-radius:15px;
+    box-shadow:var(--shadow);padding:13px 13px 12px;cursor:pointer;
+    transition:transform .12s, box-shadow .2s, border-color .2s;
+    animation:placeIn .42s backwards cubic-bezier(.2,.9,.3,1);
+  }
+  @keyframes placeIn{from{opacity:0;transform:translateY(12px) scale(.94)}to{opacity:1;transform:none}}
+  body.calm .place{animation:none}
+  .place:hover{border-color:var(--line-strong)}
+  .place:active{transform:scale(.96)}
+  .place.added{border-color:#bfe2cd;background:#f2faf5}
+  .place .p-ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;
+    background:var(--panel-2);color:var(--ink-soft);margin-bottom:9px;transition:.2s}
+  .place.added .p-ic{background:#e0f2e8;color:var(--green)}
+  .place .p-ic svg{width:16px;height:16px}
+  .place .p-name{font-size:13.5px;font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .place .p-addr{font-size:11.5px;color:var(--ink-soft);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .place .p-add{font-size:11px;font-weight:600;color:var(--blue);margin-top:9px;display:flex;align-items:center;gap:4px}
+  .place.added .p-add{color:var(--green)}
+  .place .p-add svg{width:13px;height:13px}
+  .place .p-x{position:absolute;top:7px;right:7px;width:22px;height:22px;border-radius:50%;
+    background:var(--panel-2);border:1px solid var(--line);display:grid;place-items:center;
+    color:var(--ink-faint);cursor:pointer;opacity:.85;transition:.15s;padding:0}
+  .place .p-x:hover{background:#fdecee;color:var(--red);border-color:#f2c7cd;opacity:1}
+  .place .p-x svg{width:12px;height:12px}
 </style>
 </head>
 <body>
@@ -360,6 +399,17 @@
       </div>
       <input id="inAddr" type="text" placeholder="Address or access note (optional)" autocomplete="off">
     </div>
+  </div>
+
+  <div class="saved" id="savedSec" style="display:none">
+    <div class="saved-head">
+      <div class="lbl">Saved locations · tap to add</div>
+      <div class="arrows">
+        <button class="arw" id="arwL" aria-label="Scroll left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+        <button class="arw" id="arwR" aria-label="Scroll right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+      </div>
+    </div>
+    <div class="track" id="track"></div>
   </div>
 
   <div class="list" id="list"></div>
@@ -428,7 +478,7 @@
     </div>
   </div>
 
-  <div class="set-foot">SiteSecure · v1.2</div>
+  <div class="set-foot">SiteSecure · v1.3</div>
 </div>
 
 <!-- ===== BOTTOM NAV ===== -->
@@ -545,6 +595,8 @@ function render(){
   }else warn.classList.remove("show");
 
   el("footerActions").style.display = total? "flex":"none";
+
+  renderCarousel();
 
   // cards
   if(total===0){
@@ -692,11 +744,13 @@ el("mConfirm").addEventListener("click", ()=>{
 function addSite(){
   const name = el("inName").value.trim();
   if(!name) return el("inName").focus();
-  state.sites.push({
-    id:uid(), name, addr:el("inAddr").value.trim(), notes:"",
+  const addr = el("inAddr").value.trim();
+  state.sites.unshift({
+    id:uid(), name, addr, notes:"",
     arrivedAt:null, unlocked:false, disarmed:false, locked:false, armed:false, lightsOff:false,
     securedAt:null, open:true
   });
+  upsertPlace(name, addr);
   el("inName").value=""; el("inAddr").value="";
   persistRender(); el("inName").focus();
 }
@@ -805,12 +859,77 @@ function go(page){
 }
 document.querySelectorAll(".nav-item").forEach(n=> n.addEventListener("click", ()=>go(n.dataset.nav)));
 
+/* ---------- saved locations carousel ---------- */
+function upsertPlace(name, addr){
+  if(!name) return;
+  if(!state.places) state.places=[];
+  const key = name.trim().toLowerCase();
+  const ex = state.places.find(p=> p.name.trim().toLowerCase()===key);
+  if(ex){ if(addr && !ex.addr) ex.addr = addr; }
+  else state.places.push({ id:uid(), name:name.trim(), addr:addr||"" });
+}
+function removePlace(id){
+  const p = (state.places||[]).find(x=>x.id===id);
+  if(p && confirm(`Remove "${p.name}" from saved locations?`)){
+    state.places = state.places.filter(x=>x.id!==id);
+    persistRender();
+  }
+}
+function scrollToSite(id){
+  const c = listEl.querySelector(`[data-card="${id}"]`);
+  if(c) c.scrollIntoView({behavior:"smooth", block:"center"});
+}
+function addFromPlace(id){
+  const p = (state.places||[]).find(x=>x.id===id); if(!p) return;
+  const key = p.name.trim().toLowerCase();
+  const existing = state.sites.find(s=> s.name.trim().toLowerCase()===key && !s.securedAt);
+  if(existing){ existing.open=true; persistRender(); scrollToSite(existing.id); return; }
+  const site = { id:uid(), name:p.name, addr:p.addr, notes:"",
+    arrivedAt:null, unlocked:false, disarmed:false, locked:false, armed:false, lightsOff:false,
+    securedAt:null, open:true };
+  state.sites.unshift(site);
+  persistRender(); scrollToSite(site.id);
+}
+function renderCarousel(){
+  const sec = el("savedSec");
+  const places = state.places||[];
+  if(!places.length){ sec.style.display="none"; return; }
+  sec.style.display="block";
+  const todayNames = new Set(state.sites.filter(s=>!s.securedAt).map(s=> s.name.trim().toLowerCase()));
+  const pin = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>`;
+  const check = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+  const plus = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+  const track = el("track");
+  track.innerHTML = places.map((p,i)=>{
+    const added = todayNames.has(p.name.trim().toLowerCase());
+    return `<div class="place ${added?"added":""}" data-place="${p.id}" style="animation-delay:${i*45}ms">
+      <button class="p-x" data-rmplace="${p.id}" title="Remove from saved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <div class="p-ic">${added?check:pin}</div>
+      <div class="p-name">${esc(p.name)}</div>
+      <div class="p-addr">${p.addr?esc(p.addr):"No address saved"}</div>
+      <div class="p-add">${added?check+"Added to today":plus+"Tap to add"}</div>
+    </div>`;
+  }).join("");
+  track.querySelectorAll("[data-place]").forEach(card=>{
+    card.addEventListener("click", e=>{
+      if(e.target.closest("[data-rmplace]")) return;
+      addFromPlace(card.dataset.place);
+    });
+  });
+  track.querySelectorAll("[data-rmplace]").forEach(b=>{
+    b.addEventListener("click", e=>{ e.stopPropagation(); removePlace(b.dataset.rmplace); });
+  });
+}
+el("arwL").addEventListener("click", ()=> el("track").scrollBy({left:-184, behavior:"smooth"}));
+el("arwR").addEventListener("click", ()=> el("track").scrollBy({left:184, behavior:"smooth"}));
+
 /* ---------- boot ---------- */
 (async ()=>{
   const saved = await store.load();
   if(saved && Array.isArray(saved.sites)) state = saved;
   if(!state.settings) state.settings = {displayName:"", ambient:true, calm:false};
   if(!state.history) state.history = [];
+  if(!state.places){ state.places=[]; (state.history||[]).forEach(h=> upsertPlace(h.name, h.addr)); }
   applySettings();
   render();
 })();
